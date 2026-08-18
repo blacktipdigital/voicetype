@@ -12,7 +12,7 @@ public sealed class TextInjector : ITextInjector
 
     public TextInjector(ILog log) => _log = log;
 
-    public InjectionResult Inject(string text, TargetSnapshot target)
+    public InjectionResult Inject(string text, TargetSnapshot target, Func<bool>? stillValid = null)
     {
         ClipboardSnapshot backup = ClipboardLease.Backup();
         if (backup.CaptureFailed)
@@ -30,6 +30,18 @@ public sealed class TextInjector : ITextInjector
 
         KeySender.ReleasePhysicalModifiers();
         Thread.Sleep(PreSendDelayMs);
+
+        // Last gate before the keystroke. Everything above — the clipboard
+        // backup (unbounded: it copies whatever formats the user had) and the
+        // settling delay — runs after the caller validated the target, so this
+        // is the only check that is actually adjacent to the paste. Refusing
+        // here leaves the transcript on the clipboard, which is exactly what
+        // the recovery flow wants, so the backup is deliberately not restored.
+        if (stillValid is not null && !stillValid())
+        {
+            _log.Warn("Target changed during insertion; transcript left on clipboard.");
+            return InjectionResult.Fail(InjectionFailure.TargetChanged);
+        }
 
         if (!KeySender.SendPasteChord(GetChord(target.Kind)))
         {

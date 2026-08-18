@@ -54,6 +54,13 @@ public sealed class DictationCoordinator : IDisposable
     /// <summary>How long the cleanup pass may take before falling back to raw text.</summary>
     public const int CleanupTimeoutMs = 10_000;
 
+    /// <summary>
+    /// How long Shift+Alt+Z will replay the last result. Without an expiry the
+    /// process holds one transcript indefinitely and a stray chord hours later
+    /// injects it into whatever happens to be focused then.
+    /// </summary>
+    public const int LastResultTtlMs = 5 * 60_000;
+
     private readonly object _gate = new();
     private readonly Timer _guardTimer;
     private readonly IHotkeySource _hotkeys;
@@ -74,6 +81,7 @@ public sealed class DictationCoordinator : IDisposable
     private long _chordDownAtMs;
     private long _releaseAtMs;
     private string? _lastResult;
+    private long _lastResultAtMs;
 
     public DictationCoordinator(
         IHotkeySource hotkeys,
@@ -110,8 +118,18 @@ public sealed class DictationCoordinator : IDisposable
         _audio.CaptureError += OnCaptureError;
     }
 
-    /// <summary>Last final result (cleaned or raw fallback), kept in memory for Shift+Alt+Z.</summary>
+    /// <summary>Last final result (cleaned or raw fallback), kept in memory for Shift+Alt+Z until it expires.</summary>
     public string? LastResult => _lastResult;
+
+    /// <summary>True once the stored result is older than <see cref="LastResultTtlMs"/>.</summary>
+    internal bool LastResultExpired =>
+        _lastResult is null || _clock.ElapsedMs - _lastResultAtMs > LastResultTtlMs;
+
+    private void SetLastResult(string text)
+    {
+        _lastResult = text;
+        _lastResultAtMs = _clock.ElapsedMs;
+    }
 
     public DictationState State
     {
@@ -276,7 +294,7 @@ public sealed class DictationCoordinator : IDisposable
             if (!string.IsNullOrWhiteSpace(partial))
             {
                 // Never lose dictated words: recover the best partial text.
-                _lastResult = partial;
+                SetLastResult(partial);
                 Recover(partial, RecoveryReason.TranscriptionIncomplete);
                 SaveHistory(partial, $"Recovered: {RecoveryReason.TranscriptionIncomplete}", null);
             }
@@ -298,7 +316,7 @@ public sealed class DictationCoordinator : IDisposable
         }
 
         var (text, degradedReason) = await CleanAsync(raw, target).ConfigureAwait(false);
-        _lastResult = text;
+        SetLastResult(text);
 
         // Degradation must be visible in History, not just Trace.
         // Fixed labels only — never exception text or content.
@@ -318,7 +336,7 @@ public sealed class DictationCoordinator : IDisposable
         InjectionResult result;
         try
         {
-            result = _injector.Inject(text, target!);
+            result = _injector.Inject(text, target!, () => StillSafeToPaste(target!));
         }
         catch (Exception ex)
         {
@@ -330,8 +348,9 @@ public sealed class DictationCoordinator : IDisposable
 
         if (!result.Success)
         {
-            Recover(text, RecoveryReason.InjectionFailed);
-            SaveHistory(text, $"Recovered: {RecoveryReason.InjectionFailed}{suffix}", null);
+            RecoveryReason reason = MapInjectionFailure(result.Failure);
+            Recover(text, reason);
+            SaveHistory(text, $"Recovered: {reason}{suffix}", null);
             return;
         }
 
@@ -421,6 +440,16 @@ public sealed class DictationCoordinator : IDisposable
             return;
         }
 
+        // Expire rather than replay: an hours-old transcript injected into
+        // whatever is focused now is a disclosure, not a convenience.
+        if (LastResultExpired)
+        {
+            _lastResult = null;
+            _log.Info("Paste-last ignored; the stored result expired.");
+            ErrorOccurred?.Invoke("Last result expired — dictate again.");
+            return;
+        }
+
         TargetSnapshot? target = SafeCaptureTarget();
         RecoveryReason? refusal = CheckTarget(target);
         if (refusal is not null)
@@ -434,10 +463,10 @@ public sealed class DictationCoordinator : IDisposable
 
         try
         {
-            var result = _injector.Inject(text, target!);
+            var result = _injector.Inject(text, target!, () => StillSafeToPaste(target!));
             if (!result.Success)
             {
-                Recover(text, RecoveryReason.InjectionFailed);
+                Recover(text, MapInjectionFailure(result.Failure));
                 return;
             }
         }
@@ -451,6 +480,30 @@ public sealed class DictationCoordinator : IDisposable
         TextInserted?.Invoke(text);
         TransitionToIdle();
     }
+
+    /// <summary>
+    /// The subset of <see cref="CheckTarget"/> that can change between the
+    /// check and the keystroke. Passed to the injector so the last word on
+    /// where a paste lands is taken next to the paste itself.
+    /// </summary>
+    private bool StillSafeToPaste(TargetSnapshot target)
+    {
+        try
+        {
+            return _targets.IsTargetStillValid(target) && !_targets.IsForegroundElevated();
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Re-validation threw; refusing to paste.", ex);
+            return false;
+        }
+    }
+
+    private static RecoveryReason MapInjectionFailure(InjectionFailure failure) => failure switch
+    {
+        InjectionFailure.TargetChanged => RecoveryReason.FocusChanged,
+        _ => RecoveryReason.InjectionFailed,
+    };
 
     private RecoveryReason? CheckTarget(TargetSnapshot? target)
     {

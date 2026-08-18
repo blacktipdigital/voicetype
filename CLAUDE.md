@@ -5,7 +5,7 @@ You are helping someone install and run VoiceType on their own Windows machine. 
 ## Ground rules
 
 1. **Never ask the user to paste their OpenAI API key into this chat.** They type it directly into the VoiceType Settings window. If they paste it here anyway, tell them to revoke that key at platform.openai.com and generate a new one.
-2. **Tell them what the app does before they run it.** It installs a global keyboard hook and streams mic audio to OpenAI while they hold the chord. Point them at the Privacy section of README.md. Do not skip this because it slows the install down.
+2. **Tell them what the app does before they run it.** It installs a global keyboard hook, streams mic audio to OpenAI while they hold the chord, and passes every transcript through the system clipboard to paste it. Point them at the Privacy section of README.md and say the clipboard part out loud — if they have Windows Clipboard History (Win+V) enabled, Windows retains every transcript independently of this app. Do not skip this because it slows the install down.
 3. **Run one step at a time and confirm each one.** Don't dump all six steps and hope.
 4. **Don't modify the source to "fix" the install.** If the build fails, diagnose the environment. Report a real bug rather than patching around it.
 5. **If they aren't on Windows, stop.** This is WPF + WASAPI + Win32 hooks. There's no port and there won't be one. Say so plainly instead of attempting a workaround.
@@ -39,7 +39,7 @@ Expect `Build succeeded. 0 Warning(s) 0 Error(s)`. If NuGet restore fails, it's 
 dotnet test VoiceType.slnx -c Release --no-build
 ```
 
-Expect **86 passed, 0 failed**. No API key required and no network calls. If tests fail, stop and diagnose. Don't tell them to run the app anyway.
+Expect **101 passed, 0 failed**. No API key required and no network calls. If tests fail, stop and diagnose. Don't tell them to run the app anyway.
 
 ## Step 4 — Get an API key
 
@@ -91,6 +91,7 @@ $s.Save()
 | Nothing happens on `Ctrl`+`Win` | Focused window is elevated (admin). Windows hides the chord from a non-elevated hook. Click into a normal window and retry. This is a documented limitation, not a bug. |
 | Overlay shows, no text arrives | Missing or invalid API key, or no billing credit. Check Settings, then the OpenAI usage dashboard. |
 | Text lands on the clipboard with a popup | Working as designed. The target refused safe insertion (password field, focus changed, uneditable control). Paste it manually. |
+| "Last result expired" on Shift+Alt+Z | Working as designed. The replay buffer expires 5 minutes after the dictation so a stray chord cannot inject an old transcript into whatever is focused later. Dictate again. |
 | Text pasted twice / two tray icons | Two copies running from an older build. Quit both from the tray, or `Get-Process VoiceType \| Stop-Process`, then relaunch one. |
 | Recording seems stuck | Release both keys. The hook reconciles key state every 100 ms and will clear it. |
 | Wrong words for names or products | Settings → Dictionary → add the correct spelling. Saves instantly. |

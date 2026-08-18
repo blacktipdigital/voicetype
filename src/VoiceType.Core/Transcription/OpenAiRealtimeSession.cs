@@ -25,6 +25,11 @@ internal sealed class OpenAiRealtimeSession : ITranscriptionSession
     private const int ConnectTimeoutMs = 5_000;
     private const int MaxQueuedChunks = 2_048; // ~3.4 min of audio; overflow fails the session
 
+    // Ceiling on one reassembled server message. Transcription events are
+    // kilobytes; without a cap a stuck or hostile continuation stream grows
+    // the buffer until the process dies mid-dictation.
+    private const int MaxMessageBytes = 4 * 1024 * 1024;
+
     private readonly string _apiKey;
     private readonly ILog _log;
     private readonly ClientWebSocket _ws = new();
@@ -180,6 +185,9 @@ internal sealed class OpenAiRealtimeSession : ITranscriptionSession
                         _finalTranscript.TrySetException(new InvalidOperationException("Socket closed before final transcript."));
                         return;
                     }
+
+                    if (message.Length + result.Count > MaxMessageBytes)
+                        throw new InvalidOperationException("Realtime message exceeded the size cap.");
 
                     message.Write(buffer, 0, result.Count);
                 } while (!result.EndOfMessage);

@@ -27,7 +27,7 @@ Open source, no account, no subscription. You bring your own OpenAI API key and 
 | Hold `Ctrl`+`Win` | Record. Release to transcribe and paste. |
 | Tap `Ctrl`+`Win` (under 300 ms) | Cancels silently. Stops accidental triggers. |
 | `Esc` while recording | Cancel. Nothing is inserted or sent. |
-| `Shift`+`Alt`+`Z` | Paste the last result again. |
+| `Shift`+`Alt`+`Z` | Paste the last result again, within 5 minutes of dictating it. |
 
 Tray icon gives you Settings, History, and Quit.
 
@@ -65,8 +65,9 @@ Read this part. This app installs a global keyboard hook and streams microphone 
 - **The keyboard hook is global and it has to be.** That's the only way to catch `Ctrl`+`Win` while another app has focus. It inspects key state to detect the chord and passes everything else through. It does not record, store, or transmit your keystrokes. The code is in [`KeyboardHookSource.cs`](src/VoiceType.Core/Hotkeys/KeyboardHookSource.cs) and [`ChordDetector.cs`](src/VoiceType.Core/Hotkeys/ChordDetector.cs) — it's about 150 lines, read it yourself.
 - **The microphone is only live while you hold the chord.** Release, `Esc`, or an error all stop capture immediately. Audio is streamed to OpenAI for transcription and is not written to disk.
 - **Your audio and transcripts go to OpenAI.** That is how transcription and cleanup happen. Their API data-usage policy applies. If that's not acceptable for what you dictate, don't use this.
-- **Your API key is encrypted at rest** with Windows DPAPI (CurrentUser scope) at `%LOCALAPPDATA%\VoiceType\openai.key.bin`. Only your Windows account can decrypt it. It never enters `settings.json`, the repo, or any log.
-- **History is local and text-only.** `%LOCALAPPDATA%\VoiceType\history.json`, 7-day retention, 1,000-entry cap, cleared from the History window whenever you want. No audio is kept.
+- **Your API key is encrypted at rest** with Windows DPAPI (CurrentUser scope) at `%LOCALAPPDATA%\VoiceType\openai.key.bin`. Only your Windows account can decrypt it. It never enters `settings.json`, the repo, or any log. Note what DPAPI does and does not do: it protects the file, not your session — any code already running as you can ask Windows to decrypt it, same as every other app that stores a credential this way.
+- **Insertion goes through your clipboard, and that has consequences.** To place text at your caret VoiceType copies the transcript to the clipboard and sends a paste chord, then restores your previous clipboard contents about half a second later. While it is there, any process that watches the clipboard can read it. **If Windows Clipboard History (Win+V) is on, Windows keeps a copy of every transcript**, and syncs it to your Microsoft account if you enabled "Sync across devices" — that copy outlives VoiceType's own retention and is not something the app can clear. Turn clipboard history off in Settings → System → Clipboard if you dictate anything sensitive.
+- **History is local, text-only, and encrypted at rest.** `%LOCALAPPDATA%\VoiceType\history.json`, DPAPI CurrentUser so another process running as you cannot read it off disk, 7-day retention, 1,000-entry cap, cleared from the History window whenever you want. No audio is kept.
 - **Logs never contain content.** No transcripts, no audio, no keystrokes, no window titles, no secrets. Enforced at the [`ILog`](src/VoiceType.Core/Logging/ILog.cs) seam.
 - **No telemetry, no analytics, no phone-home.** The only network calls in the codebase go to `api.openai.com`. Grep for `https://` and verify.
 
@@ -88,17 +89,21 @@ Deliberately out of scope: login, billing, teams, cloud sync, mobile, macOS, scr
 
 ## Architecture
 
-`VoiceType.Core` holds all logic behind interfaces and has no WPF dependency, which is why 86 tests run without a UI or a network call. `VoiceType.App` is the WPF tray shell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`VoiceType.Core` holds all logic behind interfaces and has no WPF dependency, which is why 101 tests run without a UI or a network call. `VoiceType.App` is the WPF tray shell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```powershell
 dotnet test VoiceType.slnx
 ```
 
-86 tests, no API key needed, zero network calls. Two live fixtures that do hit the API are opt-in only via `VOICETYPE_RUN_LIVE_FIXTURE=1`.
+101 tests, no API key needed, zero network calls. Two live fixtures that do hit the API are opt-in only via `VOICETYPE_RUN_LIVE_FIXTURE=1`.
 
 ## Contributing
 
 Issues and PRs welcome. Keep `VoiceType.Core` free of WPF references, keep new tests offline by default, and don't add anything that logs transcript content.
+
+## Security
+
+Threat model, what is deliberately out of scope, and how to report a vulnerability privately: [SECURITY.md](SECURITY.md).
 
 ## License
 

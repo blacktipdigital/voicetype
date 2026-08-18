@@ -1,6 +1,6 @@
 # Architecture
 
-Two projects. All logic lives in `VoiceType.Core`, which has **no WPF dependency** — that's why 86 tests run with no UI, no microphone, and no network. `VoiceType.App` is a thin WPF tray shell that wires concrete implementations into the coordinator.
+Two projects. All logic lives in `VoiceType.Core`, which has **no WPF dependency** — that's why 101 tests run with no UI, no microphone, and no network. `VoiceType.App` is a thin WPF tray shell that wires concrete implementations into the coordinator.
 
 ```
 src/
@@ -42,12 +42,15 @@ These are load-bearing. Breaking one is a bug, not a style choice.
 - **Secrets go through `ISecretStore`.** DPAPI CurrentUser at rest. Never in `settings.json`, never in a log, never in a test.
 - **Protected tokens outrank the dictionary.** Dictionary casing is never applied inside URLs, paths, CLI flags, camelCase, snake_case, or code.
 - **One process only.** `SingleInstanceGuard` takes a named mutex before any tray icon, hook, capture, or provider exists. Two instances would each own a hook and paste twice.
+- **The target is re-checked next to the keystroke, not just before insertion starts.** `Inject` takes a `stillValid` callback and runs it after the clipboard backup and settling delay. The caller's earlier check is not sufficient on its own — focus can move while the clipboard work happens.
+- **Dictated content is encrypted at rest.** History goes through `IDataProtector` (DPAPI CurrentUser). Legacy plaintext files are read once and re-encrypted on the next write.
+- **Prompt fields are sanitized before the join.** `appCategory` and dictionary terms are single-line by construction, so control characters in them are forged structure and get collapsed.
 - **Every external dependency sits behind an interface** (`IAudioCapture`, `ITranscriptionProvider`, `ICleanupProvider`, `ITargetService`, `ISecretStore`, `IClock`, `ILog`) so tests use fakes.
 
 ## Tests
 
 ```powershell
-dotnet test VoiceType.slnx        # 86 tests, offline, no key
+dotnet test VoiceType.slnx        # 101 tests, offline, no key
 ```
 
 Two live fixtures call the real API and cost money, so they're opt-in:

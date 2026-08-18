@@ -23,6 +23,7 @@ public sealed class KeyboardHookSource : IHotkeySource
 
     private Timer? _watchdog;
     private Thread? _hookThread;
+    private readonly ManualResetEventSlim _hookThreadReady = new(false);
     private uint _hookThreadId;
     private nint _hookHandle;
     private LowLevelKeyboardProc? _hookProc; // field keeps the delegate alive for the native hook
@@ -42,6 +43,8 @@ public sealed class KeyboardHookSource : IHotkeySource
         if (_hookThread is not null) return;
 
         _cts = new CancellationTokenSource();
+        _hookThreadReady.Reset();
+        _hookThreadId = 0;
         _ = Task.Run(() => PumpSignalsAsync(_cts.Token));
 
         _hookThread = new Thread(HookThreadMain)
@@ -59,7 +62,16 @@ public sealed class KeyboardHookSource : IHotkeySource
         _watchdog?.Dispose();
         _watchdog = null;
         if (_hookThread is null) return;
-        NativeMethods.PostThreadMessage(_hookThreadId, NativeMethods.WM_QUIT, 0, 0);
+
+        // The id is published on the hook thread. Stopping before it lands
+        // would post WM_QUIT to thread 0, the message loop would never exit,
+        // and the global hook would outlive the process teardown.
+        _hookThreadReady.Wait(TimeSpan.FromSeconds(2));
+        if (_hookThreadId != 0)
+            NativeMethods.PostThreadMessage(_hookThreadId, NativeMethods.WM_QUIT, 0, 0);
+        else
+            _log.Warn("Hook thread id never published; skipping quit message.");
+
         _hookThread.Join(TimeSpan.FromSeconds(2));
         _hookThread = null;
         _cts?.Cancel();
@@ -72,11 +84,13 @@ public sealed class KeyboardHookSource : IHotkeySource
         _disposed = true;
         Stop();
         _signals.Writer.TryComplete();
+        _hookThreadReady.Dispose();
     }
 
     private void HookThreadMain()
     {
         _hookThreadId = NativeMethods.GetCurrentThreadId();
+        _hookThreadReady.Set();
         _hookProc = HookCallback;
         _hookHandle = NativeMethods.SetWindowsHookEx(
             NativeMethods.WH_KEYBOARD_LL, _hookProc, NativeMethods.GetModuleHandle(null), 0);

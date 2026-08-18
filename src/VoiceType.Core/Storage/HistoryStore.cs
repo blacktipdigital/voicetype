@@ -1,6 +1,8 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using VoiceType.Core.Logging;
+using VoiceType.Core.Security;
 using VoiceType.Core.Time;
 
 namespace VoiceType.Core.Storage;
@@ -28,8 +30,11 @@ public interface IHistoryStore
 
 /// <summary>
 /// Text-only history at %LOCALAPPDATA%\VoiceType\history.json. Stores final
-/// transcripts, never audio. A corrupted file is renamed aside and the store
-/// restarts empty instead of failing.
+/// transcripts, never audio, and encrypts them at rest with DPAPI so another
+/// process running as the same user cannot read them off disk. A file that
+/// cannot be read or decrypted is renamed aside and the store restarts empty
+/// instead of failing. Plaintext files written by earlier versions are read
+/// once and re-encrypted on the next write.
 /// </summary>
 public sealed class JsonHistoryStore : IHistoryStore
 {
@@ -40,6 +45,7 @@ public sealed class JsonHistoryStore : IHistoryStore
     private readonly string _path;
     private readonly IClock _clock;
     private readonly ILog _log;
+    private readonly IDataProtector _protector;
 
     public JsonHistoryStore(IClock clock, ILog log)
         : this(clock, log, Path.Combine(
@@ -49,10 +55,16 @@ public sealed class JsonHistoryStore : IHistoryStore
     }
 
     public JsonHistoryStore(IClock clock, ILog log, string path)
+        : this(clock, log, path, new DpapiDataProtector())
+    {
+    }
+
+    public JsonHistoryStore(IClock clock, ILog log, string path, IDataProtector protector)
     {
         _clock = clock;
         _log = log;
         _path = path;
+        _protector = protector;
     }
 
     public void Add(HistoryEntry entry)
@@ -95,10 +107,19 @@ public sealed class JsonHistoryStore : IHistoryStore
 
     private List<HistoryEntry> LoadUnsafe()
     {
+        byte[] plaintext = Array.Empty<byte>();
         try
         {
             if (!File.Exists(_path)) return new List<HistoryEntry>();
-            return JsonSerializer.Deserialize<List<HistoryEntry>>(File.ReadAllText(_path)) ?? new List<HistoryEntry>();
+
+            byte[] stored = File.ReadAllBytes(_path);
+            if (stored.Length == 0) return new List<HistoryEntry>();
+
+            // Pre-encryption files start with a bare JSON array. Read them as
+            // they are; the next write re-encrypts them.
+            plaintext = LooksLikePlaintextJson(stored) ? stored : _protector.Unprotect(stored);
+
+            return JsonSerializer.Deserialize<List<HistoryEntry>>(plaintext) ?? new List<HistoryEntry>();
         }
         catch (Exception ex)
         {
@@ -106,6 +127,20 @@ public sealed class JsonHistoryStore : IHistoryStore
             try { File.Move(_path, _path + ".corrupt", overwrite: true); } catch { /* best effort */ }
             return new List<HistoryEntry>();
         }
+        finally
+        {
+            // Never leave decrypted transcripts sitting in a reachable buffer.
+            if (plaintext.Length > 0) Array.Clear(plaintext);
+        }
+    }
+
+    /// <summary>True for a legacy unencrypted file: a JSON array after any BOM and leading whitespace.</summary>
+    private static bool LooksLikePlaintextJson(byte[] stored)
+    {
+        int i = 0;
+        if (stored.Length >= 3 && stored[0] == 0xEF && stored[1] == 0xBB && stored[2] == 0xBF) i = 3;
+        while (i < stored.Length && stored[i] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') i++;
+        return i < stored.Length && stored[i] == (byte)'[';
     }
 
     private void WritePurgedUnsafe(List<HistoryEntry> entries)
@@ -119,7 +154,18 @@ public sealed class JsonHistoryStore : IHistoryStore
 
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         string tmp = _path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(kept, new JsonSerializerOptions { WriteIndented = true }));
+
+        byte[] plaintext = Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(kept, new JsonSerializerOptions { WriteIndented = true }));
+        try
+        {
+            File.WriteAllBytes(tmp, _protector.Protect(plaintext));
+        }
+        finally
+        {
+            Array.Clear(plaintext);
+        }
+
         File.Move(tmp, _path, overwrite: true);
     }
 }

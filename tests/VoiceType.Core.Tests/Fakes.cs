@@ -61,8 +61,27 @@ internal sealed class FakeTextInjector : ITextInjector
     public InjectionResult NextResult { get; set; } = InjectionResult.Ok;
     public bool CopySucceeds { get; set; } = true;
 
-    public InjectionResult Inject(string text, TargetSnapshot target)
+    /// <summary>Records what the late re-validation callback returned, or null when the caller passed none.</summary>
+    public bool? StillValidResult { get; private set; }
+
+    /// <summary>When set, the fake fails the way the real injector does once re-validation refuses.</summary>
+    public bool HonourStillValid { get; set; }
+
+    /// <summary>
+    /// Runs inside Inject before re-validation, standing in for the real
+    /// injector's clipboard backup and settling delay — the window in which
+    /// focus can move after the coordinator already approved the target.
+    /// </summary>
+    public Action? DuringInsertionWindow { get; set; }
+
+    public InjectionResult Inject(string text, TargetSnapshot target, Func<bool>? stillValid = null)
     {
+        DuringInsertionWindow?.Invoke();
+        StillValidResult = stillValid?.Invoke();
+
+        if (HonourStillValid && StillValidResult == false)
+            return InjectionResult.Fail(InjectionFailure.TargetChanged);
+
         InjectCalls.Add((text, target));
         return NextResult;
     }

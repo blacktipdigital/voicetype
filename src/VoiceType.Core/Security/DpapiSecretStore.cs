@@ -36,7 +36,17 @@ public sealed class DpapiSecretStore : ISecretStore
             if (!File.Exists(_path)) return null;
             byte[] ciphertext = File.ReadAllBytes(_path);
             byte[] plaintext = ProtectedData.Unprotect(ciphertext, null, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(plaintext);
+            try
+            {
+                return Encoding.UTF8.GetString(plaintext);
+            }
+            finally
+            {
+                // The returned string is still an unpinned managed copy — .NET
+                // gives no way around that — but the byte buffer does not have
+                // to survive into a crash dump or the page file as well.
+                Array.Clear(plaintext);
+            }
         }
         catch (Exception ex)
         {
@@ -48,9 +58,16 @@ public sealed class DpapiSecretStore : ISecretStore
     public void SetApiKey(string apiKey)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        byte[] ciphertext = ProtectedData.Protect(
-            Encoding.UTF8.GetBytes(apiKey), null, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(_path, ciphertext);
+        byte[] plaintext = Encoding.UTF8.GetBytes(apiKey);
+        try
+        {
+            File.WriteAllBytes(_path, ProtectedData.Protect(plaintext, null, DataProtectionScope.CurrentUser));
+        }
+        finally
+        {
+            Array.Clear(plaintext);
+        }
+
         _log.Info("API key stored (DPAPI CurrentUser).");
     }
 

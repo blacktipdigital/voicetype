@@ -54,9 +54,16 @@ public sealed class OpenAiResponsesCleanupProvider : ICleanupProvider, IDisposab
 
         // Labeled fields, not a JSON blob: the nano model treats raw JSON as
         // data to echo and skips the cleanup. Same three fields, nothing else.
+        //
+        // appCategory and dictionaryTerms are single-line by construction, so
+        // any newline in them is forged structure — a term ending in a fake
+        // "rawTranscript:" line would otherwise replace the spoken text with
+        // attacker-chosen content that then gets pasted. Strip line breaks and
+        // control characters before the join; the transcript itself is the
+        // last field, so it cannot be followed by a forged one.
         string userInput =
-            $"appCategory: {request.AppCategory}\n" +
-            $"dictionaryTerms: {string.Join("; ", request.DictionaryTerms)}\n" +
+            $"appCategory: {SanitizeField(request.AppCategory)}\n" +
+            $"dictionaryTerms: {string.Join("; ", request.DictionaryTerms.Select(SanitizeField))}\n" +
             $"rawTranscript:\n{request.RawTranscript}";
 
         var payload = new
@@ -96,6 +103,22 @@ public sealed class OpenAiResponsesCleanupProvider : ICleanupProvider, IDisposab
     }
 
     public void Dispose() => _http.Dispose();
+
+    /// <summary>
+    /// Collapses anything that could forge a new labeled line into a space.
+    /// Public so the field-forgery guard is directly testable without a
+    /// network call.
+    /// </summary>
+    public static string SanitizeField(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        var sb = new StringBuilder(value.Length);
+        foreach (char c in value)
+            sb.Append(char.IsControl(c) ? ' ' : c);
+
+        return sb.ToString().Trim();
+    }
 
     private static string ExtractOutputText(string body)
     {
