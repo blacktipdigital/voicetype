@@ -1,0 +1,32 @@
+<Window x:Class="VoiceType.App.RecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VoiceType — text not inserted"
+        Width="480" Height="320"
+        WindowStartupLocation="CenterScreen" Topmost="True"
+        Background="#FAFAFA">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="ReasonText" Grid.Row="0" FontSize="14" FontWeight="SemiBold"
+                   TextWrapping="Wrap" Margin="0,0,0,4" Foreground="#202124"/>
+        <TextBlock x:Name="ClipboardStatusText" Grid.Row="1" FontSize="12"
+                   TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#5F6368"/>
+
+        <TextBox x:Name="TranscriptBox" Grid.Row="2" AcceptsReturn="True" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" FontSize="13" Padding="8"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="CopyAgainButton" Content="Copy Again" Width="110" Height="30"
+                    Margin="0,0,8,0" Click="OnCopyAgain"/>
+            <Button Content="Open History" Width="110" Height="30" Margin="0,0,8,0"
+                    Click="OnOpenHistory"/>
+            <Button Content="Close" Width="80" Height="30" Click="OnClose"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,38 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+publish/
+*.user
+*.suo
+*.pdb
+*.dll
+*.exe
+project.assets.json
+project.nuget.cache
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.xml
+*.coverage
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local secrets — never commit. VoiceType stores your key DPAPI-encrypted
+# in %LOCALAPPDATA%\VoiceType\, never in the repo. This is belt-and-braces.
+*.key
+*.key.bin
+.env
+.env.*
+appsettings.Local.json
+secrets.json
