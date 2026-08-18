@@ -97,11 +97,11 @@ public class CleanupFixtureTests
         // URLs
         new("url-1", "check out https://example.com/pricing for the details",
             new[] { "https://example.com/pricing" }, Array.Empty<string>()),
-        // Deliberate dictionary/URL collision. "Northwind
-        // Digital" is in DictionaryTerms, but the URL must stay byte-for-byte
-        // lowercase — protected tokens outrank dictionary substitutions.
-        new("url-2", "the repo lives at github.com/blacktip/voicetype if you need it",
-            new[] { "github.com/blacktip/voicetype" }, Array.Empty<string>()),
+        // Deliberate dictionary/URL collision. "Northwind Labs" is in
+        // DictionaryTerms, but the URL must stay byte-for-byte lowercase —
+        // protected tokens outrank dictionary substitutions.
+        new("url-2", "the repo lives at github.com/northwind/voicetype if you need it",
+            new[] { "github.com/northwind/voicetype" }, Array.Empty<string>()),
         // CLI flags
         new("cli-1", "run the deploy script with --dry-run and --verbose flags",
             new[] { "--dry-run", "--verbose" }, Array.Empty<string>(), Category: "terminal"),
